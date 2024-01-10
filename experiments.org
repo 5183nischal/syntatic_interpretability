@@ -1,0 +1,16 @@
+#+title: Experiments
+#+PROPERTY: header-args:jupyter-python :session py
+#+PROPERTY: header-args:jupyter-python+ :async yes
+
+* Imports
+
+I use org-mode as my repl, and generally want to do the bulk coding in the project folder with ___init__  and import them here for experiments/figures. The autoreload reloads the changes without restart.
+
+#+begin_src jupyter-python
+%load_ext autoreload
+%autoreload 2
+import numpy as np
+from synterp.measures import *
+#+end_src
+
+* Training time evolution of weight sv's
