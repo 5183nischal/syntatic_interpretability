@@ -1,45 +1,38 @@
 import torch
-from transformer_lens import HookedTransformer, FactoredMatrix
-from typing import Literal, Tuple
+from transformer_lens import HookedTransformer, FactoredMatrix # type: ignore
+from jaxtyping import Float
+from dataclasses import dataclass
 
-# TODO: Tensortyping
+@dataclass
+class AttnEffectiveDimension:
+    qk_eff_dims: Float[torch.Tensor, "n_layers n_heads"]
+    ov_eff_dims: Float[torch.Tensor, "n_layers n_heads"]
 
-def circuit_effective_dimension(circuit: FactoredMatrix) -> float:
-    svd = circuit.svd()[1].flatten()
-    return float(svd.sum()**2 / (svd**2).sum())
+def circuit_effective_dimension(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
+    # circuit: Float[torch.Tensor, "n_layers n_heads d_model d_model"]
+    singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
+    return singular_values.sum(dim=-1)**2 / (singular_values**2).sum(dim=-1)
 
-# TODO: Make a dataclass
-def attn_circuits_effective_dim(model: HookedTransformer) -> Tuple[float, float]:
-    ov_eff_dim = circuit_effective_dimension(model.OV)
-    qk_eff_dim = circuit_effective_dimension(model.QK)
-    return qk_eff_dim, ov_eff_dim
+def attn_circuits_effective_dimimension(model: HookedTransformer) -> AttnEffectiveDimension:
+    return AttnEffectiveDimension(
+        qk_eff_dims = circuit_effective_dimension(model.QK),
+        ov_eff_dims = circuit_effective_dimension(model.OV)
+    )
 
-# TODO: I'm not sure what the motivation behind this is
-# TODO: Typing
-def weight_dimensions_unroll(model: HookedTransformer):
-    q_ov = model.OV.svd()[1]
-    q_qk = model.QK.svd()[1]
-    eff_dim_ov = (q_ov).sum(axis=-1)**2 / (q_ov**2).sum(axis=-1)
-    eff_dim_qk = (q_qk).sum(axis=-1)**2 / (q_qk**2).sum(axis=-1)
-    dims = [eff_dim_ov.mean(axis=-1), eff_dim_qk.mean(axis=-1)]
-    return dims
+@dataclass
+class AttnEffectiveRank:
+    qk_eff_ranks: Float[torch.Tensor, "n_layers n_heads"]
+    ov_eff_ranks: Float[torch.Tensor, "n_layers n_heads"]
 
-# TODO: Test for memory consistency
-# TODO: Typing
-def effective_rank(model: HookedTransformer):
-  q_ov = model.OV.svd()[1]
-  q_qk = model.QK.svd()[1]
-  q_ov = q_ov/q_ov.sum(dim=-1, keepdim=True)
-  q_qk = q_qk/q_qk.sum(dim=-1, keepdim=True)
-  q_ov = torch.sum(q_ov * torch.log(q_ov), dim=-1)
-  q_qk = torch.sum(q_qk * torch.log(q_qk), dim=-1)
-  dims = [torch.exp(-q_ov).mean(axis=-1).cpu().detach().numpy(), torch.exp(-q_qk).mean(axis=-1).cpu().detach().numpy()]
-  del q_ov, q_qk
-  return dims
+def circuit_effective_rank(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
+    # circuit: Float[torch.Tensor, "n_layers n_heads d_model d_model"]
+    singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
+    singular_values_normalized: Float[torch.Tensor, "n_layers n_heads d_head"] = singular_values / singular_values.sum(dim=-1, keepdim=True)
+    singular_value_entropy: Float[torch.Tensor, "n_layers n_heads"] = (-singular_values_normalized * torch.log(singular_values_normalized)).sum(dim=-1)
+    return torch.exp(singular_value_entropy) # TODO: Does this need to add an eps??
 
-if __name__ == "__main__":
-    device = 'cpu'
-    model_name = 'pythia-160m'
-    index = 120
-    model = HookedTransformer.from_pretrained(model_name, checkpoint_index=index, device=device)
-    attn_circuits_effective_dim(model)
+def attn_circuits_effective_rank(model: HookedTransformer) -> AttnEffectiveRank:
+    return AttnEffectiveRank(
+        qk_eff_ranks = circuit_effective_rank(model.QK),
+        ov_eff_ranks = circuit_effective_rank(model.OV)
+    )
