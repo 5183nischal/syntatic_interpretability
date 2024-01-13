@@ -2,37 +2,41 @@ import torch
 from transformer_lens import HookedTransformer, FactoredMatrix # type: ignore
 from jaxtyping import Float
 from dataclasses import dataclass
+from typing import Literal
 
-@dataclass
-class AttnEffectiveDimension:
-    qk_eff_dims: Float[torch.Tensor, "n_layers n_heads"]
-    ov_eff_dims: Float[torch.Tensor, "n_layers n_heads"]
+# TODO: Test for Memory Leakages
+# TODO: Write reduce functions
+
+Metric = Literal['effective_dimension', 'effective_rank']
 
 def circuit_effective_dimension(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
     # circuit: Float[torch.Tensor, "n_layers n_heads d_model d_model"]
-    singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
-    return singular_values.sum(dim=-1)**2 / (singular_values**2).sum(dim=-1)
-
-def attn_circuits_effective_dimimension(model: HookedTransformer) -> AttnEffectiveDimension:
-    return AttnEffectiveDimension(
-        qk_eff_dims = circuit_effective_dimension(model.QK),
-        ov_eff_dims = circuit_effective_dimension(model.OV)
-    )
-
-@dataclass
-class AttnEffectiveRank:
-    qk_eff_ranks: Float[torch.Tensor, "n_layers n_heads"]
-    ov_eff_ranks: Float[torch.Tensor, "n_layers n_heads"]
+    with torch.no_grad():
+        singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
+        return singular_values.sum(dim=-1)**2 / (singular_values**2).sum(dim=-1)
 
 def circuit_effective_rank(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
     # circuit: Float[torch.Tensor, "n_layers n_heads d_model d_model"]
-    singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
-    singular_values_normalized: Float[torch.Tensor, "n_layers n_heads d_head"] = singular_values / singular_values.sum(dim=-1, keepdim=True)
-    singular_value_entropy: Float[torch.Tensor, "n_layers n_heads"] = (-singular_values_normalized * torch.log(singular_values_normalized)).sum(dim=-1)
-    return torch.exp(singular_value_entropy) # TODO: Does this need to add an eps??
+    with torch.no_grad():
+        singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
+        singular_values_normalized: Float[torch.Tensor, "n_layers n_heads d_head"] = singular_values / singular_values.sum(dim=-1, keepdim=True)
+        singular_value_entropy: Float[torch.Tensor, "n_layers n_heads"] = (-singular_values_normalized * torch.log(singular_values_normalized)).sum(dim=-1)  # TODO: Do we need a + EPS here? 
+        return torch.exp(singular_value_entropy)
 
-def attn_circuits_effective_rank(model: HookedTransformer) -> AttnEffectiveRank:
-    return AttnEffectiveRank(
-        qk_eff_ranks = circuit_effective_rank(model.QK),
-        ov_eff_ranks = circuit_effective_rank(model.OV)
+METRIC_REGISTRIY = {
+    'effective_dimension': circuit_effective_dimension,
+    'effective_rank': circuit_effective_rank
+}
+
+@dataclass
+class AttnCircuitMeasurements:
+    metric: Metric
+    qk: Float[torch.Tensor, "n_layers n_heads"]
+    ov: Float[torch.Tensor, "n_layers n_heads"]
+
+def measure_attn_circuits(model: HookedTransformer, metric: Metric) -> AttnCircuitMeasurements:
+    return AttnCircuitMeasurements(
+        metric=metric,
+        qk = METRIC_REGISTRIY[metric](model.QK),
+        ov = METRIC_REGISTRIY[metric](model.OV)
     )
