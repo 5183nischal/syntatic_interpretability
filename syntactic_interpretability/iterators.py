@@ -1,64 +1,50 @@
-from typing import List, Any, Tuple, Dict
+from typing import List,  Literal, Optional, Dict
 import torch
 from transformer_lens import HookedTransformer, evals
-from transformers import AutoTokenizer
+from jaxtyping import Float
+from dataclasses import dataclass
 
+@dataclass
+class Extracted:
+    model_name: str
+    num_tokens_seen: int
+    data: str
+    logits: Optional[Float[torch.Tensor, "seq_pos vocab_len"]] = None
+    activations: Optional[Dict[str, Float[torch.Tensor, "n_layer seq_pos d_model"]]] = None
 
-class TrainingDynamicsConfig:
-    model_names: List[str] # TODO: Add a verifier that interfaces with the correct external libraries
-    checkpoint_indices: List[int]
-    dataset: Any
-    num_tokens_predicted: int
-    num_devices: int # TODO Add a verifier which asserts that this value is greater than 0, and that there are the correct num of devices
-    tokenizer: str
-    data_loader_batch_size: int
-    # TODO: metric ???
+Module = Literal['attn_out', 'mlp_out']
 
-# TODO: Add tensortyping 
-def gather_logits_at_num_tokens_seen(
-        model_name: str, 
-        checkpoint_index: int, 
-        device:torch.device, 
-        input_tokens: Any
-    ) -> Tuple[int, Any]:    
-    tokens = input_tokens.to(device)
-    model = HookedTransformer.from_pretrained(model_name, checkpoint_index=checkpoint_index, device=device)
-    num_tokens_seen = model.cfg.checkpoint_value
-    logits = model(tokens, return_type="logits") # TODO: Do I have to take this into it's own device??
-    del model
-    return num_tokens_seen, logits
+def extractor(
+    model_name: str, 
+    checkpoint_idx: int, 
+    data: List[str], 
+    device: str, 
+    extract_logits: bool, 
+    extract_activations: List[Module]
+) -> List[Extracted]:
+    
+    def _extract_activations_and_logits(x: str, model: HookedTransformer, extract_logits: bool, extract_activations: List[Module]) -> Extracted:
+        if not extract_activations:
+            logits = model(x, return_type="logits")
+            return Extracted(
+                model_name=model_name, 
+                num_tokens_seen=model.cfg.checkpoint_value, 
+                data=x, 
+                logits=logits
+            )
+        
+        logits, cache = model.run_with_cache(x, return_type="logits", loss_per_token=True, remove_batch_dim=True)
+        activations = {key: activation for key, activation in cache.items() if any([x in key for x in extract_activations])}
+        return Extracted(
+            model_name=model_name, 
+            num_tokens_seen=model.cfg.checkpoint_value, 
+            data=x, 
+            logits=logits if extract_logits else None,
+            activations= activations
+        )
+    
+    model = HookedTransformer.from_pretrained(model_name, checkpoint_index=checkpoint_idx, device=device)
+    return [_extract_activations_and_logits(x, model, extract_logits, extract_activations) for x in data]
 
-LogitMetric = Callable[[str, int, torch.device, Any], Tuple[int, Any]]
-WeightMetric = Callable[[str, int, torch.device], Tuple[int, Any]]
-ActivationMetric = Callable[[str, int, torch.device, Any], Tuple[int, Any]]
-
-from typing import Callable, Union
-
-# TODO: Parallelize this
-# TODO: Generalize this to take in a class for what kind of data you are extracting
-def iterate_models_and_checkpoints(config: TrainingDynamicsConfig, metric: Union[LogitMetric, WeightMetric, ActivationMetric]) -> Dict[str, Dict[int, Any]]:
-    if config.num_devices == 0:
-        device = 'cpu'
-    elif config.num_devices == 1:
-        device = 'cuda'
-    else:
-        raise NotImplementedError("We have yet to implement parallelization for this")
-
-    # TODO: load dataloader
-    # TODO: I'm not crazy about this whole evals thing for the dataloader....
-    # TODO: Also, not crazy about this whole loading in the model to use the tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
-    pile_dataloader = evals.make_pile_data_loader(tokenizer=tokenizer, batch_size=config.data_loader_batch_size) # TODO: Hmm, this may actually be a bug in the experiment. Like, if we're just doing this this is bad.
-    tokens = next(iter(pile_dataloader))['tokens'][:,:config.num_tokens_predicted]
-
-    model_name_checkpoint_idx_tuples = [(model_name, checkpoint_idx) for model_name in config.model_names for checkpoint_idx in config.checkpoint_indices]
-    out = {model_name: dict() for model_name in config.model_names}
-    for model_name, index in model_name_checkpoint_idx_tuples:
-        num_tokens_seen, logits = gather_logits_at_num_tokens_seen(model_name, index, device, tokens)
-        out[model_name][num_tokens_seen] = logits
-    return out
-
-# Then I need to reshape things (For reasons which I don't quite understand)
-# Then I need to inpca the model predictions
-
-# And then I need to create the visualization
+if __name__ == "__main__":
+    extractor('pythia-160m', -1, ["Hello World", "My name is Johny Smith"], "cpu", extract_logits=True, extract_activations=['attn_out', 'mlp_out'])
