@@ -10,7 +10,7 @@ class Extracted:
     num_tokens_seen: int
     data: str
     logits: Optional[Float[torch.Tensor, "seq_pos vocab_len"]] = None
-    activations: Optional[Dict[str, Float[torch.Tensor, "n_layer seq_pos d_model"]]] = None
+    activations: Optional[Dict[str, Float[torch.Tensor, "seq_pos d_model"]]] = None
 
 Module = Literal['attn_out', 'mlp_out']
 
