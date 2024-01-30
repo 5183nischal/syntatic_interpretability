@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from jaxtyping import Float
 from transformer_lens.ActivationCache import ActivationCache
 import re
