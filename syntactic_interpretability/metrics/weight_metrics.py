@@ -9,13 +9,13 @@ from typing import Literal
 
 Metric = Literal['effective_dimension', 'effective_rank']
 
-def circuit_effective_dimension(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
+def _circuit_effective_dimension(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
     # circuit: Float[torch.Tensor, "n_layers n_heads d_model d_model"]
     with torch.no_grad():
         singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
         return singular_values.sum(dim=-1)**2 / (singular_values**2).sum(dim=-1)
 
-def circuit_effective_rank(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
+def _circuit_effective_rank(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_layers n_heads"]:
     # circuit: Float[torch.Tensor, "n_layers n_heads d_model d_model"]
     with torch.no_grad():
         singular_values: Float[torch.Tensor, "n_layers n_heads d_head"] = circuit.svd()[1]
@@ -24,8 +24,8 @@ def circuit_effective_rank(circuit: FactoredMatrix) -> Float[torch.Tensor, "n_la
         return torch.exp(singular_value_entropy)
 
 METRIC_REGISTRIY = {
-    'effective_dimension': circuit_effective_dimension,
-    'effective_rank': circuit_effective_rank
+    'effective_dimension': _circuit_effective_dimension,
+    'effective_rank': _circuit_effective_rank
 }
 
 @dataclass
@@ -34,9 +34,22 @@ class AttnCircuitMeasurements:
     qk: Float[torch.Tensor, "n_layers n_heads"]
     ov: Float[torch.Tensor, "n_layers n_heads"]
 
+    @property
+    def qk_reduced(self) -> float:
+        raise NotImplementedError
+    
+    @property
+    def ov_reduced(self) -> float:
+        raise NotImplementedError
+
 def measure_attn_circuits(model: HookedTransformer, metric: Metric) -> AttnCircuitMeasurements:
     return AttnCircuitMeasurements(
         metric=metric,
         qk = METRIC_REGISTRIY[metric](model.QK),
         ov = METRIC_REGISTRIY[metric](model.OV)
     )
+
+if __name__ == "__main__":
+    model = HookedTransformer.from_pretrained("pythia-160m", checkpoint_index=-1, device='cpu')
+    foo = measure_attn_circuits(model, 'effective_dimension')
+    bar = measure_attn_circuits(model, 'effective_rank')
