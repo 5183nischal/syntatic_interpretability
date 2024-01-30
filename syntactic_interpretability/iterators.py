@@ -1,6 +1,6 @@
 from typing import List,  Literal, Optional, Dict
 import torch
-from transformer_lens import HookedTransformer, evals
+from transformer_lens import HookedTransformer
 from jaxtyping import Float
 from dataclasses import dataclass
 
@@ -23,7 +23,12 @@ def extractor(
     extract_activations: List[Module]
 ) -> List[Extracted]:
     
-    def _extract_activations_and_logits(x: str, model: HookedTransformer, extract_logits: bool, extract_activations: List[Module]) -> Extracted:
+    def _extract_activations_and_logits(
+            x: str, 
+            model: HookedTransformer, 
+            extract_logits: bool, 
+            extract_activations: List[Module]
+    ) -> Extracted:
         if not extract_activations:
             logits = model(x, return_type="logits")
             return Extracted(
