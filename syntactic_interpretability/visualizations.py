@@ -1,7 +1,14 @@
 import plotly.graph_objects as go
 import webcolors
-from typing import List
+from typing import List, Literal
 from dataclasses import dataclass
+import torch
+
+from syntactic_interpretability.metrics.weight_metrics import AttnCircuitMeasurements
+
+# TODO: Move the cicuit type upper & lower bound logic into the metric class
+# TODO: Once metrics are optional, Depending on circuit, validate all metrics are present
+# TODO: plot_attn_circuit_measurements :: Dict[str, List[AttnCircuitMeasurements]] -> Literal['qk', 'ov'] -> go.Figure
 
 @dataclass
 class Line:
@@ -20,7 +27,39 @@ class Line:
         lengths = [len(self.x), len(self.y), len(self.upper_bound), len(self.lower_bound)]
         if not all(length == lengths[0] for length in lengths):
             raise ValueError("All lists in Line must have the same length")
+    
+    @classmethod
+    def from_attn_circuit_measurement(circuits: List[AttnCircuitMeasurements], color: str, circuit_type: Literal['qk', 'ov']) -> "Line":
+        assert all([circuit.model_name == circuits[0].model_name for circuit in circuits]), "Circuit measurements must come from the same model"
 
+        def _tensor_min(tensor: torch.Tensor) -> float:
+          flattened_tensor = torch.flatten(tensor)
+          return torch.min(flattened_tensor).item()
+            
+        def _tensor_max(tensor: torch.Tensor) -> float:
+          flattened_tensor = torch.flatten(tensor)
+          return torch.max(flattened_tensor).item()
+
+        if circuit_type == 'qk':
+          ys = [circuit.qk_reduced for circuit in circuits]
+          lower_bound = [_tensor_min(circuit.qk) for circuit in circuits]
+          upper_bound = [_tensor_max(circuit.qk) for circuit in circuits]
+        elif circuit_type == 'ov':
+          ys = [circuit.ov_reduced for circuit in circuits]
+          lower_bound = [_tensor_min(circuit.ov) for circuit in circuits]
+          upper_bound = [_tensor_max(circuit.ov) for circuit in circuits]
+        else:
+           raise ValueError(f"circuit type must be either 'qk' or 'ov': {circuit_type}")
+        
+        return Line(
+            name=circuits[0].model_name,
+            color=color,
+            x=[circuit.num_tokens_seen for circuit in circuits],
+            y=ys,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound
+        )
+    
 
 def continuous_error_boundary_plot(
     lines: List[Line], 
