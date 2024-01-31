@@ -4,6 +4,9 @@ from transformer_lens import HookedTransformer
 from jaxtyping import Float
 from dataclasses import dataclass
 
+# TODO: Have Extracted inheret from Measurements
+# TODO: Move the Extractor logic into a "from_model"
+
 @dataclass
 class Extracted:
     model_name: str
