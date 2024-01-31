@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 # TODO: Test for Memory Leakages
+# TODO: Change dataclass into pydantic??
+# TODO: Collapse all metrics into AttnCircuitMeasurement properties & Make them optional & create a config for running the sweep
+# TODO: Create a save to disk function
+# TODO: Add checkpoint_index to attn_circuit_measurements
 
 Metric = Literal['effective_dimension', 'effective_rank']
 
@@ -29,6 +33,8 @@ METRIC_REGISTRIY = {
 
 @dataclass
 class AttnCircuitMeasurements:
+    model_name: str
+    num_tokens_seen: int
     metric: Metric
     qk: Float[torch.Tensor, "n_layers n_heads"]
     ov: Float[torch.Tensor, "n_layers n_heads"]
@@ -43,6 +49,8 @@ class AttnCircuitMeasurements:
 
 def measure_attn_circuits(model: HookedTransformer, metric: Metric) -> AttnCircuitMeasurements:
     return AttnCircuitMeasurements(
+        model_name=model.cfg.model_name,
+        num_tokens_seen=model.cfg.checkpoint_value,
         metric=metric,
         qk = METRIC_REGISTRIY[metric](model.QK),
         ov = METRIC_REGISTRIY[metric](model.OV)
