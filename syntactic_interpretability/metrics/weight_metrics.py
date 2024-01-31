@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 # TODO: Test for Memory Leakages
-# TODO: Write reduce functions
 
 Metric = Literal['effective_dimension', 'effective_rank']
 
@@ -36,11 +35,11 @@ class AttnCircuitMeasurements:
 
     @property
     def qk_reduced(self) -> float:
-        raise NotImplementedError
+        return torch.mean(self.qk).item()
     
     @property
     def ov_reduced(self) -> float:
-        raise NotImplementedError
+        return torch.mean(self.qk).item()
 
 def measure_attn_circuits(model: HookedTransformer, metric: Metric) -> AttnCircuitMeasurements:
     return AttnCircuitMeasurements(
