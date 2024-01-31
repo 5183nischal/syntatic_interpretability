@@ -4,6 +4,9 @@ from transformer_lens.ActivationCache import ActivationCache
 import re
 from typing import Literal
 
+# TODO: Utilize the Extracted Class rather than the ActivationCache
+# TODO: Double check whether attn_eff_dim language is correct in the write up.
+# TODO: Include mathematical description of attn_eff_dim in description
 
 def extract_modules_from_activation_cache(module: Literal['attn', 'mlp'], cache: ActivationCache) -> Float[torch.Tensor, "n_layers seq_pos d_model"]:
   out = []
@@ -18,7 +21,6 @@ def attn_eff_dim(n_layers: int, cache: ActivationCache):
     """
     Computes 
     """
-    # TODO: Double check whether language is correct in the write up.
     with torch.no_grad():
       eff_dim = []
       for i in range(n_layers):
