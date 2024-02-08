@@ -1,38 +1,72 @@
 import torch
 from jaxtyping import Float
-from transformer_lens.ActivationCache import ActivationCache
-import re
-from typing import Literal
+from transformer_lens import HookedTransformer
+from typing import Literal, List, Dict, Optional
+from dataclasses import dataclass
+from datasets import load_dataset
 
-# TODO: Utilize the Extracted Class rather than the ActivationCache
+from syntactic_interpretability.metrics.measurement import Measurement
+
 # TODO: Double check whether attn_eff_dim language is correct in the write up.
 # TODO: Include mathematical description of attn_eff_dim in description
+# TODO: Test in eff_dim (module name preservation, & expected values)
 
-def extract_modules_from_activation_cache(module: Literal['attn', 'mlp'], cache: ActivationCache) -> Float[torch.Tensor, "n_layers seq_pos d_model"]:
-  out = []
-  for module_name, module_tensor in cache.items():
-     if not re.match(rf"^blocks\.\d+\.hook_{module}_out$", module_name):
-        continue
-     out.append(module_tensor)
-  return torch.cat(out, dim=0)
+def prep_dataset(dataset_name: str, dataset_split: str, num_samples: int, max_token_len: int, model_name: str):
+    dataset = load_dataset(dataset_name)
+    _tokenizer = HookedTransformer.from_pretrained(model_name).tokenizer
+    
+    out = []
+    for i in range(num_samples):
+        text = dataset[dataset_split][i]['text']
+        tokens = _tokenizer(text)['input_ids']
+        out_str = _tokenizer.decode(tokens[:max_token_len])
+        out.append(out_str)
+    return out
 
 
-def attn_eff_dim(n_layers: int, cache: ActivationCache):
-    """
-    Computes 
-    """
+Module = Literal['attn_out', 'mlp_out']
+
+@dataclass
+class Extracted(Measurement):
+    model_name: str
+    num_tokens_seen: int
+    data: str
+    logits: Optional[Float[torch.Tensor, "seq_pos vocab_len"]] = None
+    activations: Optional[Dict[str, Float[torch.Tensor, "seq_pos d_model"]]] = None
+
+    def from_model(
+      data_str: str, 
+      model: HookedTransformer, 
+      extract_logits: bool, 
+      extract_activations: List[Module]
+    ) -> 'Extracted':
+      if not extract_activations:
+        logits = model(data_str, return_type="logits")
+        return Extracted(
+            model_name=model.cfg.model_name, 
+            num_tokens_seen=model.cfg.checkpoint_value, 
+            data=data_str, 
+            logits=logits
+        )
+    
+      logits, cache = model.run_with_cache(data_str, return_type="logits", loss_per_token=True, remove_batch_dim=True)
+      activations = {key: activation for key, activation in cache.items() if any([x in key for x in extract_activations])}
+      return Extracted(
+          model_name=model.cfg.model_name, 
+          num_tokens_seen=model.cfg.checkpoint_value, 
+          data=data_str, 
+          logits=logits if extract_logits else None,
+          activations= activations
+      )
+
+def activation_effective_dimension(module_activations_dict: Dict[str, Float[torch.Tensor, 'seq_pos d_model']]) -> Dict[str, float]:
     with torch.no_grad():
-      eff_dim = []
-      for i in range(n_layers):
-        layer: Float[torch.Tensor, "seq_pos d_model"] = cache[f"blocks.{i}.hook_attn_out"]
-        eigenvalues: Float[torch.Tensor, "seq_pos"] = torch.linalg.eigvalsh(layer @ layer.T)
-        layer_eff_dim: Float[torch.Tensor, ""] = eigenvalues.sum()**2 / (eigenvalues**2).sum()
-        eff_dim.append(layer_eff_dim)
-      return torch.cat(eff_dim)
+      out = dict()
+      for module_name, activation in module_activations_dict.items():
+        eigenvalues: Float[torch.Tensor, "seq_pos"] = torch.linalg.eigvalsh(activation @ activation.T)
+        activation_eff_dim: Float[torch.Tensor, ""] = eigenvalues.sum()**2 / (eigenvalues**2).sum()
+        out[module_name] = activation_eff_dim.item()
+      return out
 
-if __name__ == "__main__":
-  from transformer_lens import HookedTransformer
-
-  model = HookedTransformer.from_pretrained('pythia-160m', checkpoint_index=-1, device='cpu')
-  _, cache = model.run_with_cache('Hello World', return_type="loss", loss_per_token=True, remove_batch_dim=True)
-  attn_eff_dim(12, cache)
+def save_activations_as_jsonl(foo: List[Extracted]):
+    raise NotImplementedError

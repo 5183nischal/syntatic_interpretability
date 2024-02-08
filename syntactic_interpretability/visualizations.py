@@ -5,8 +5,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from syntactic_interpretability.metrics.weight_metrics import AttnCircuit, AttnCircuitsMeasurements, Metric
+from syntactic_interpretability.metrics.activations_metrics import Extracted, activation_effective_dimension
 
 # TODO: Test plot_attn_circuit_measurements()
+# TODO: Rename Line to something sensible
+# TODO: Implement more sensible error bounds on from_extracted_activations()
 
 @dataclass
 class Line:
@@ -41,7 +44,21 @@ class Line:
             upper_bound=[circuit.tensor_max(index) for circuit in circuits]
         )
     
-
+    @classmethod
+    def from_extracted_activations(cls, extractions: List[Extracted], module_name: str, color: str, metric: Metric) -> 'Line':
+        if metric == 'effective_rank':
+            raise NotImplementedError("Effective Rank is not yet implemented")
+        out = [activation_effective_dimension(x.activations)[module_name] for x in extractions]
+        
+        return Line(
+            name=extractions[0].model_name,
+            color=color,
+            x=[extraction.num_tokens_seen for extraction in extractions],
+            y=out,
+            lower_bound=out,
+            upper_bound=out,
+        )
+    
 def continuous_error_boundary_plot(
     lines: List[Line], 
     title: str,
