@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "syntactic_interpretability"
 version = "0.0.1"
 
+[tool.setuptools]
+packages = ["syntactic_interpretability"]
+
 dependencies = [
     "transformers>=4.34.1",
     "transformer_lens>=1.12.0",
