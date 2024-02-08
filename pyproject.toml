@@ -16,5 +16,6 @@ dependencies = [
     "jaxtyping>=0.2.25",
     "plotly>=5.18.0",
     "numpy==1.26.3",
-    "pydantic==2.6.1"
+    "pydantic==2.6.1",
+    "datasetse>=2.16.1"
 ]
