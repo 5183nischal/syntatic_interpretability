@@ -2,6 +2,7 @@ import plotly.graph_objects as go
 import webcolors
 from typing import List, Dict
 from dataclasses import dataclass
+import numpy as np
 
 from syntactic_interpretability.metrics.weight_metrics import AttnCircuit, AttnCircuitsMeasurements, Metric
 
@@ -26,7 +27,7 @@ class Line:
             raise ValueError("All lists in Line must have the same length")
     
     @classmethod
-    def from_attn_circuit_measurement(circuits: List[AttnCircuitsMeasurements], color: str, circuit_type: AttnCircuit, metric: Metric) -> "Line":
+    def from_attn_circuit_measurement(cls, circuits: List[AttnCircuitsMeasurements], color: str, circuit_type: AttnCircuit, metric: Metric) -> "Line":
         assert all([circuit.model_name == circuits[0].model_name for circuit in circuits]), "Circuit measurements must come from the same model"
         assert all([getattr(circuit, circuit_type) is not None for circuit in circuits]), "circuit_type must be present in all AttnCircuitMeasurements"
 

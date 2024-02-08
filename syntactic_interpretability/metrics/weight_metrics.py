@@ -45,7 +45,7 @@ class AttnCircuitsMeasurements(Measurement):
         assert self.qk is not None or self.ov is not None, ''
 
     @classmethod
-    def from_model(model: HookedTransformer, circuits: List[AttnCircuit]) -> 'AttnCircuitsMeasurements':
+    def from_model(cls, model: HookedTransformer, circuits: List[AttnCircuit]) -> 'AttnCircuitsMeasurements':
         assert circuits, 'circuits cannot be an empty list'
         return AttnCircuitsMeasurements(
             model_name=model.cfg.model_name,
