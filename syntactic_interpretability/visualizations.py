@@ -8,11 +8,10 @@ from syntactic_interpretability.metrics.weight_metrics import AttnCircuit, AttnC
 from syntactic_interpretability.metrics.activations_metrics import Extracted, activation_effective_dimension
 
 # TODO: Test plot_attn_circuit_measurements()
-# TODO: Rename Line to something sensible
 # TODO: Implement more sensible error bounds on from_extracted_activations()
 
 @dataclass
-class Line:
+class GraphLine:
     name: str
     color: str
     x: List[float]
@@ -30,12 +29,12 @@ class Line:
             raise ValueError("All lists in Line must have the same length")
     
     @classmethod
-    def from_attn_circuit_measurement(cls, circuits: List[AttnCircuitsMeasurements], color: str, circuit_type: AttnCircuit, metric: Metric) -> "Line":
+    def from_attn_circuit_measurement(cls, circuits: List[AttnCircuitsMeasurements], color: str, circuit_type: AttnCircuit, metric: Metric) -> "GraphLine":
         assert all([circuit.model_name == circuits[0].model_name for circuit in circuits]), "Circuit measurements must come from the same model"
         assert all([getattr(circuit, circuit_type) is not None for circuit in circuits]), "circuit_type must be present in all AttnCircuitMeasurements"
 
         index = f'{circuit_type}.{metric}'
-        return Line(
+        return GraphLine(
             name=circuits[0].model_name,
             color=color,
             x=[circuit.num_tokens_seen for circuit in circuits],
@@ -45,12 +44,12 @@ class Line:
         )
     
     @classmethod
-    def from_extracted_activations(cls, extractions: List[Extracted], module_name: str, color: str, metric: Metric) -> 'Line':
+    def from_extracted_activations(cls, extractions: List[Extracted], module_name: str, color: str, metric: Metric) -> 'GraphLine':
         if metric == 'effective_rank':
             raise NotImplementedError("Effective Rank is not yet implemented")
         out = [activation_effective_dimension(x.activations)[module_name] for x in extractions]
         
-        return Line(
+        return GraphLine(
             name=extractions[0].model_name,
             color=color,
             x=[extraction.num_tokens_seen for extraction in extractions],
@@ -60,7 +59,7 @@ class Line:
         )
     
 def continuous_error_boundary_plot(
-    lines: List[Line], 
+    lines: List[GraphLine], 
     title: str,
     x_axis_title: str,
     y_axis_title: str,
@@ -95,15 +94,15 @@ def plot_attn_circuit_measurements(
     x_axis_title: str,
     y_axis_title: str
 ) -> go.Figure:
-  lines = [Line.from_attn_circuit_measurement(measurements, color, circuit_type, metric) for color, measurements in measurements_color_dict.items()]
+  lines = [GraphLine.from_attn_circuit_measurement(measurements, color, circuit_type, metric) for color, measurements in measurements_color_dict.items()]
   return continuous_error_boundary_plot(lines=lines, title=title, x_axis_title=x_axis_title, y_axis_title=y_axis_title)
         
 if __name__ == "__main__":
   import numpy as np
   lines = [
-      Line(name='Sin Line', color='red', x=np.linspace(0, 10, 100), y=np.sin(np.linspace(0, 10, 100)),
+      GraphLine(name='Sin Line', color='red', x=np.linspace(0, 10, 100), y=np.sin(np.linspace(0, 10, 100)),
           upper_bound=np.sin(np.linspace(0, 10, 100)) + 0.2, lower_bound=np.sin(np.linspace(0, 10, 100)) - 0.2),
-      Line(name='Cos Line', color='blue', x=np.linspace(0, 10, 100), y=np.cos(np.linspace(0, 10, 100)),
+      GraphLine(name='Cos Line', color='blue', x=np.linspace(0, 10, 100), y=np.cos(np.linspace(0, 10, 100)),
           upper_bound=np.cos(np.linspace(0, 10, 100)) + 0.1, lower_bound=np.cos(np.linspace(0, 10, 100)) - 0.1),
   ]
 
