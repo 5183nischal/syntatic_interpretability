@@ -1,14 +1,4 @@
-
-# Byte-compiled / optimized / DLL files
+**.egg-info
+**explore.ipynb
 __pycache__/
-*.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-data/
-tex/
-.ob-jupyter/
+.vscode/
