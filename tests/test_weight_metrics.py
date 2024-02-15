@@ -1,7 +1,7 @@
 from transformer_lens import HookedTransformer
 
 from syntactic_interpretability.metrics.weight_metrics import AttnCircuitsMeasurements
-from syntactic_interpretability.visualizations import Line
+from syntactic_interpretability.visualizations import GraphLine
 
 # TODO: Test all combinations of metrics
 # TODO: Test intermittent persistence
