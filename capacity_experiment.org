@@ -1,0 +1,220 @@
+#+title: ICL capacity
+#+PROPERTY: header-args:jupyter-python :session /jpy:localhost#8888:/
+#+PROPERTY: header-args:jupyter-python+ :async yes
+
+* Capacity analysis
+** Imports and setups
+
+#+begin_src jupyter-python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+import torch
+import torch.nn as nn
+import transformer_lens
+import transformer_lens.utils as utils
+from transformer_lens.hook_points import (
+    HookedRootModule,
+    HookPoint,
+)  # Hooking utilities
+from transformer_lens import HookedTransformer, HookedTransformerConfig, FactoredMatrix, ActivationCache, loading_from_pretrained
+from transformer_lens.loading_from_pretrained import get_checkpoint_labels, get_official_model_name
+from transformer_lens import evals
+
+from capacity.manifold_geometry.manifold_analysis import *
+from capacity.manifold_geometry.manifold_analysis_correlation import *
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+torch.set_grad_enabled(False)
+model = HookedTransformer.from_pretrained("attn-only-1l", device=device)
+pile_batch_size = 1
+pile_dataloader = evals.make_pile_data_loader(tokenizer=model.tokenizer, batch_size=pile_batch_size)
+print('Using device:', device)
+print()
+
+#Additional Info when using cuda
+if device.type == 'cuda':
+    print(torch.cuda.get_device_name(0))
+    print('Memory Usage:')
+    print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
+    print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3,1), 'GB')
+#+end_src
+
+#+RESULTS:
+: Loaded pretrained model attn-only-1l into HookedTransformer
+: 10000
+: Using device: cuda
+:
+: NVIDIA RTX A6000
+: Memory Usage:
+: Allocated: 0.2 GB
+: Cached:    0.2 GB
+
+** Sanity check with random vectors
+
+#+begin_src jupyter-python
+X = [np.random.randn(10, 2) for i in range(100)] # P = 100 is the number of samples, vector representation dimension N = 10, example per category M = 2
+kappa = 0    # Specify the margin (usually 0)
+n_t = 100    # Specify the number of Gaussian vectors to sample (200 or 300 is a good default)
+alpha, radius, dimension = manifold_analysis(X,kappa,n_t)
+# alpha, radius, dimension, C0, KK = manifold_analysis_corr(np.asarray(X),kappa,n_t) # If you think the categories are correlated use this instead
+cap = 1/np.mean(1/alpha)
+rad = np.mean(radius)
+dim = np.mean(dimension)
+cap, rad, dim
+print(f"Random: capacity = {cap:.2f}, radius = {rad:.2f}, dimension = {dim:.2f}")
+#+end_src
+
+#+RESULTS:
+: Random: capacity = 0.98, radius = 0.94, dimension = 0.80
+
+#+begin_src jupyter-python
+pile_batch_size = 70
+pile_dataloader = evals.make_pile_data_loader(tokenizer=model.tokenizer, batch_size=pile_batch_size)
+with torch.no_grad():
+    torch.cuda.empty_cache()
+#checkpoint_indices = [10, 25, 35, 60, -1]
+checkpoint_indices = [-1]
+# token = next(iter(pile_dataloader))['tokens'][:,:time_length].to(device)
+token = next(iter(pile_dataloader))['tokens'].to(device)
+model_predictions = []
+model_to_tokens_trained_on = []
+
+# This defines the time slices in the context we will be measuring at
+slices = [3, 8, 12, 20, 40, 100, 125, 150, 300, 500, 1000]
+window = 3
+context_sample = np.concatenate([np.arange(s-window, s, 1) for s in slices])
+
+#token = token.view(-1)[torch.randperm(token.numel())].view(*token.shape)
+token[1:, context_sample] = token[0,  context_sample]
+token = token[1:, :] # A crude way to establish baseline commonality by brutally making common token at context sample positions
+
+k = 13
+# subselect_idx = np.random.randint(0, 48262, k) # for logit layer
+subselect_idx = np.random.randint(0, 512, k), # capacity is preserved under random downsampling from size N to log(N)
+for model_name in ["attn-only-2l"]:
+    print(model_name)
+    tokens_trained_on = []
+    model_logits = []
+    for index in checkpoint_indices:
+      model_for_this_checkpoint = HookedTransformer.from_pretrained(model_name, checkpoint_index=index, device=device)
+
+      tokens_seen_for_this_checkpoint = model_for_this_checkpoint.cfg.checkpoint_value
+      tokens_trained_on.append(tokens_seen_for_this_checkpoint)
+
+      loss_vec, cache = model_for_this_checkpoint.run_with_cache(token, return_type='loss', loss_per_token=True)
+
+      # print(cache['blocks.0.hook_attn_out'].cpu().detach().shape)
+      # model_logits.append(model_for_this_checkpoint(token, return_type="logits").squeeze().cpu().detach()[..., subselect_idx]) #for logit analysis
+      model_logits.append(np.transpose(cache['blocks.1.hook_attn_out'].cpu().detach()[..., subselect_idx][:, context_sample, :], axes=(0,2,1))) # focus on the transformer head input
+      del(model_for_this_checkpoint)
+      del(cache)
+    model_predictions.append(torch.stack(model_logits, dim=0))
+    model_to_tokens_trained_on.append(tokens_trained_on)
+
+with torch.no_grad():
+    torch.cuda.empty_cache()
+
+# Cache dictionary keys : ActivationCache with keys ['hook_embed', 'hook_pos_embed', 'blocks.0.hook_resid_pre', 'blocks.0.ln1.hook_scale', 'blocks.0.ln1.hook_normalized', 'blocks.0.attn.hook_q', 'blocks.0.attn.hook_k', 'blocks.0.attn.hook_v', 'blocks.0.attn.hook_attn_scores', 'blocks.0.attn.hook_pattern', 'blocks.0.attn.hook_z', 'blocks.0.hook_attn_out', 'blocks.0.hook_resid_post', 'ln_final.hook_scale', 'ln_final.hook_normalized']
+#+end_src
+
+#+RESULTS:
+: 10000
+: attn-only-2l
+: Loaded pretrained model attn-only-2l into HookedTransformer
+
+
+
+#+begin_src jupyter-python
+# Reshaing the measurements in the right format for mean field capacity measurement function
+token_0 = torch.zeros(pile_batch_size-1, k, len(context_sample))
+for i in range(len(context_sample)):
+    _, cache = model.run_with_cache(token[:,context_sample[i]], return_type='loss', loss_per_token=True)
+    # print(cache['ln_final.hook_normalized'].cpu().detach()[..., subselect_idx].squeeze().shape, token_0[:,:,0].shape)
+    token_0[:,:,i] = cache['ln_final.hook_normalized'].cpu().detach()[..., subselect_idx].squeeze()
+    # del(cache)
+measure_pre = model_predictions[0] - token_0
+measure = [measure_pre[:, :, :, i*window:(i+1)*window] for i in range(measure_pre.size(-1) // window)]
+print(measure[1].shape) #[time in context window, P (aka number of prompts), N (the downsampled size), M (the time slice)]
+#+end_src
+
+#+RESULTS:
+: torch.Size([1, 69, 13, 3])
+
+
+#+begin_src jupyter-python
+kappa = 0    # Specify the margin (usually 0)
+n_t = 200    # Specify the number of Gaussian vectors to sample (200 or 300 is a good default)
+capacity_list = []
+radius_list = []
+dimensions_list = []
+c0_list = []
+kk_list = []
+for time in range(len(slices)):
+    alpha, radius, dimension, C0, KK = manifold_analysis_corr(np.asarray(measure[time][0]),kappa,n_t)
+    # alpha, radius, dimension= manifold_analysis(np.asarray(measure[time][0]),kappa,n_t) # This is a faster way to measure but not as accurate
+    cap = 1/np.mean(1/alpha)
+    rad = np.mean(radius)
+    dim = np.mean(dimension)
+    print(f"time = {time}, capacity = {cap:.2f}, radius = {rad:.2f}, dimension = {dim:.2f}, correlation: {C0:.2f}, rank: {KK:.2f}")
+    capacity_list.append(cap)
+    radius_list.append(rad)
+    dimensions_list.append(dim)
+    c0_list.append(C0)
+    kk_list.append(KK)
+#+end_src
+
+#+RESULTS:
+: time = 0, capacity = 0.41, radius = 16.5, dimension = 1.85, correlation: 0.44, rank: 4.00
+: time = 1, capacity = 0.52, radius = 2.24, dimension = 1.69, correlation: 0.28, rank: 2.00
+: time = 2, capacity = 0.47, radius = 4.50, dimension = 1.76, correlation: 0.28, rank: 2.00
+: time = 3, capacity = 0.71, radius = 1.88, dimension = 1.16, correlation: 0.27, rank: 2.00
+: time = 4, capacity = 0.53, radius = 2.20, dimension = 1.68, correlation: 0.29, rank: 2.00
+: time = 5, capacity = 0.60, radius = 1.68, dimension = 1.60, correlation: 0.28, rank: 3.00
+: time = 6, capacity = 0.55, radius = 1.87, dimension = 1.68, correlation: 0.27, rank: 2.00
+: time = 7, capacity = 0.52, radius = 2.52, dimension = 1.66, correlation: 0.29, rank: 2.00
+: time = 8, capacity = 0.56, radius = 2.59, dimension = 1.56, correlation: 0.29, rank: 3.00
+: time = 9, capacity = 0.82, radius = 1.05, dimension = 1.25, correlation: 0.29, rank: 2.00
+: time = 10, capacity = 0.58, radius = 1.77, dimension = 1.62, correlation: 0.28, rank: 2.00
+
+#+begin_src jupyter-python
+plt.scatter(slices, capacity_list)
+plt.xscale('log')
+#plt.yscale('log')
+mean_loss = loss_vec.cpu().detach().numpy().mean(axis=0)
+#plt.plot(np.arange(0,1023,1), savgol_filter(mean_loss, 50, 3))
+plt.xlabel("token time")
+plt.ylabel("manifold capacity")
+plt.title("2L attn only")
+plt.show()
+#+end_src
+
+#+RESULTS:
+[[./.ob-jupyter/293fdeb89052bd0bff6bacf2d34393e5c2cd42db.png]]
+
+** Version of required packages and set up notes
+Name: autograd
+Version: 1.3
+
+Name: pymanopt
+Version: 0.2.5
+
+Name: cvxopt *
+Version: 1.3.2
+
+pip install "numpy<1.24.0"
+Name: numpy *
+Version: 1.23.5
+
+Name: scikit-learn
+Version: 1.4.0
+
+docker custom command to setup the capacity analysis in runpod instance with pytorch. I recommend RTX6000
+
+#+begin_src shell
+bash -c "\
+  pip install transformer_lens pytest 'numpy<1.24.0' autograd==1.3 cvxopt scikit-learn pymanopt==0.2.5 matplotlib && \
+  git clone https://github.com/chung-neuroai-lab/cshl2022-deep-learning-manifolds-tutorial.git /capacity && \
+  pip install --upgrade jupyter_http_over_ws>=0.0.7 && jupyter serverextension enable --py jupyter_http_over_ws && \
+  cd / && ./start.sh"
+#+end_src
